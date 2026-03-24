@@ -453,6 +453,7 @@ def _merge_results(all_sources: list[list[dict]], limit: int) -> list[dict]:
             else:
                 merged.append(r)
 
+    # 默认按引用排序
     merged.sort(
         key=lambda x: (x.get("cited_by", 0), int(x.get("year") or "0")),
         reverse=True,
@@ -464,8 +465,77 @@ def _merge_results(all_sources: list[list[dict]], limit: int) -> list[dict]:
     return merged
 
 
+def _relevance_score(paper: dict, query: str) -> float:
+    """计算论文的综合相关性得分，融合查询匹配、引用数、源质量和年份"""
+    import math
+
+    score = 0.0
+    query_terms = set(query.lower().split())
+
+    # 1. 查询词匹配 (0-40 分)
+    title_norm = _normalize_title(paper.get("title") or "")
+    abstract_norm = (paper.get("abstract") or "").lower()
+    title_words = set(title_norm.split())
+    abstract_words = set(abstract_norm.split())
+
+    if query_terms:
+        title_match = len(query_terms & title_words) / len(query_terms)
+        abstract_match = len(query_terms & abstract_words) / len(query_terms) if abstract_words else 0
+        score += title_match * 25 + abstract_match * 15  # title更重要
+
+    # 2. 引用影响力 (0-30 分) — log scaled，减少高被引垄断
+    cited = paper.get("cited_by", 0) or 0
+    if cited > 0:
+        score += min(math.log10(cited + 1) * 8, 30)  # log(10k+1)*8 ≈ 32 → capped at 30
+
+    # 3. 数据源质量加权 (0-10 分)
+    source_weights = {
+        "semantic_scholar": 10, "openalex": 9, "crossref": 8,
+        "pubmed": 8, "core": 6, "europe_pmc": 6,
+        "arxiv": 7, "doaj": 5, "dblp": 7,
+    }
+    score += source_weights.get(paper.get("source", ""), 4)
+
+    # 4. 年份新度 (0-15 分) — 最近3年加成
+    try:
+        year = int(paper.get("year") or "0")
+        if year > 0:
+            import datetime
+            current_year = datetime.datetime.now().year
+            age = max(current_year - year, 0)
+            if age <= 1:
+                score += 15
+            elif age <= 3:
+                score += 10
+            elif age <= 5:
+                score += 5
+            elif age <= 10:
+                score += 2
+    except ValueError:
+        pass
+
+    return round(score, 2)
+
+
+def _merge_and_rank(all_sources: list[list[dict]], query: str, limit: int) -> list[dict]:
+    """合并去重 + 综合相关性排序"""
+    merged = _merge_results(all_sources, limit * 3)  # 先取更多再排序
+
+    # 计算相关性得分并排序
+    for paper in merged:
+        paper["_score"] = _relevance_score(paper, query)
+
+    merged.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    merged = merged[:limit]
+
+    for i, r in enumerate(merged):
+        r["index"] = i + 1
+        r.pop("_score", None)  # 清理内部字段
+    return merged
+
+
 def search_papers(query: str, rows: int = 8) -> dict:
-    """搜索论文 — 9 源并发搜索 + 去重 + 按引用数排序"""
+    """搜索论文 — 9 源并发搜索 + 智能去重 + 综合相关性排序"""
     is_doi = query.strip().startswith("10.")
 
     # DOI 精确查询只走 Crossref
@@ -511,7 +581,7 @@ def search_papers(query: str, rows: int = 8) -> dict:
                 sources_fail.append(f"{name}: {str(e)[:40]}")
 
     if all_results:
-        merged = _merge_results(all_results, rows)
+        merged = _merge_and_rank(all_results, query, rows)
         return {
             "success": True,
             "count": len(merged),

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scholar-mcp-server"
-version = "0.3.2"
+version = "0.4.0"
 description = "Local academic paper MCP server — 9-source search, multi-source download, AI analysis, citation graph, code-based paper recommendation"
 readme = "README.md"
 license = {text = "MIT"}

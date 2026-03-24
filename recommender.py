@@ -98,6 +98,40 @@ LIBRARY_TO_KEYWORDS = {
     "django": "web framework",
     "streamlit": "data application dashboard",
     "gradio": "machine learning demo interface",
+    # 半导体 / 材料科学
+    "ase": "atomistic simulation materials science",
+    "pymatgen": "materials science computational",
+    "lammps": "molecular dynamics simulation",
+    "vasp": "density functional theory DFT",
+    "gpaw": "density functional theory electronic structure",
+    "nexusformat": "neutron scattering X-ray",
+    "semiconductor": "semiconductor physics",
+    # 化学
+    "openbabel": "cheminformatics molecular conversion",
+    "pyscf": "quantum chemistry",
+    "orca": "quantum chemistry computational",
+    "gaussian": "quantum chemistry DFT",
+    # 天文
+    "astropy": "astronomy astrophysics",
+    "sunpy": "solar physics heliophysics",
+    "lightkurve": "exoplanet transit photometry",
+    # 强化学习
+    "gymnasium": "reinforcement learning environment",
+    "stable_baselines3": "reinforcement learning policy optimization",
+    "ray": "distributed reinforcement learning",
+    # 图神经网络
+    "torch_geometric": "graph neural network",
+    "dgl": "graph neural network deep learning",
+    "networkx": "network analysis graph theory",
+    # 生成式 AI
+    "diffusers": "diffusion model image generation",
+    "openai": "large language model GPT",
+    "langchain": "large language model agent",
+    "llamaindex": "retrieval augmented generation RAG",
+    # 语音
+    "whisper": "speech recognition automatic",
+    "espnet": "speech recognition synthesis",
+    "torchaudio": "audio deep learning",
 }
 
 # 文件扩展名 → 语言
@@ -134,8 +168,13 @@ ACADEMIC_TERMS_RE = re.compile(
     r"transformer|attention mechanism|diffusion model|"
     r"CNN|RNN|LSTM|GAN|VAE|autoencoder|"
     r"coil design|magnetic field|impedance|sensor|"
-    r"spectrum|transmittance|semiconductor|"
-    r"Pareto|multi-objective|NSGA|evolutionary)\b",
+    r"spectrum|transmittance|semiconductor|bandgap|"
+    r"Pareto|multi-objective|NSGA|evolutionary|"
+    r"molecular dynamics|density functional|first.principles|"
+    r"photovoltaic|perovskite|thin.film|epitax|"
+    r"retrieval.augmented|knowledge graph|embedding|"
+    r"federated learning|contrastive learning|self.supervised|"
+    r"graph neural|point cloud|3D reconstruction)\b",
     re.IGNORECASE,
 )
 
@@ -234,10 +273,61 @@ def _build_query(scan_result: dict, max_terms: int = 8) -> str:
             break
 
     return " ".join(unique)
+def _build_queries(scan_result: dict, max_queries: int = 3) -> list[str]:
+    """从扫描结果构建多个查询（覆盖不同代码信号维度）"""
+    queries = []
+
+    # 查询 1: 基于主要 import 库的学术方向
+    lib_keywords = []
+    for lib, count in scan_result["imports"].most_common(10):
+        if lib in LIBRARY_TO_KEYWORDS:
+            lib_keywords.append((LIBRARY_TO_KEYWORDS[lib], count * 2))
+    if lib_keywords:
+        lib_keywords.sort(key=lambda x: x[1], reverse=True)
+        words = []
+        seen = set()
+        for kw, _ in lib_keywords[:5]:
+            for w in kw.split():
+                if w.lower() not in seen:
+                    words.append(w)
+                    seen.add(w.lower())
+                if len(words) >= 8:
+                    break
+            if len(words) >= 8:
+                break
+        if words:
+            queries.append(" ".join(words))
+
+    # 查询 2: 基于代码中的学术术语
+    if scan_result["academic_terms"]:
+        terms = [t for t, _ in scan_result["academic_terms"].most_common(6)]
+        if terms:
+            queries.append(" ".join(terms))
+
+    # 查询 3: 基于 LaTeX 标题（最精确）
+    if scan_result["latex_titles"]:
+        queries.append(scan_result["latex_titles"][0])
+
+    # 去重
+    unique = []
+    seen = set()
+    for q in queries:
+        q_norm = q.lower().strip()
+        if q_norm and q_norm not in seen:
+            unique.append(q)
+            seen.add(q_norm)
+
+    # 如果以上都没有，退回到旧的单查询
+    if not unique:
+        fallback = _build_query(scan_result)
+        if fallback:
+            unique = [fallback]
+
+    return unique[:max_queries]
 
 
 def recommend_papers(workspace_path: str, top_n: int = 8) -> dict:
-    """分析工作区代码，推荐相关论文
+    """分析工作区代码，推荐相关论文（多查询策略）
 
     Args:
         workspace_path: 工作区根目录路径
@@ -257,16 +347,31 @@ def recommend_papers(workspace_path: str, top_n: int = 8) -> dict:
             "error": "no supported source files found in workspace",
         }
 
-    # 2. 构建查询
-    query = _build_query(scan)
-    if not query:
+    # 2. 构建多个查询（覆盖不同代码信号）
+    queries = _build_queries(scan)
+    if not queries:
         return {
             "success": False,
             "error": "could not extract meaningful keywords from workspace",
         }
 
-    # 3. 搜索论文
-    search_result = search_papers(query, rows=top_n)
+    # 3. 搜索论文（多查询合并）
+    all_papers = []
+    seen_dois = set()
+    for q in queries:
+        search_result = search_papers(q, rows=top_n)
+        for paper in search_result.get("results", []):
+            doi = paper.get("doi", "")
+            if doi and doi in seen_dois:
+                continue
+            seen_dois.add(doi)
+            all_papers.append(paper)
+
+    # 按引用排序，取 top_n
+    all_papers.sort(key=lambda x: x.get("cited_by", 0), reverse=True)
+    all_papers = all_papers[:top_n]
+    for i, p in enumerate(all_papers):
+        p["index"] = i + 1
 
     # 4. 组装结果
     return {
@@ -275,6 +380,6 @@ def recommend_papers(workspace_path: str, top_n: int = 8) -> dict:
         "files_scanned": scan["files_scanned"],
         "detected_libraries": dict(scan["imports"].most_common(10)),
         "detected_terms": dict(scan["academic_terms"].most_common(10)),
-        "search_query": query,
-        "recommended_papers": search_result.get("results", []),
+        "search_queries": queries,
+        "recommended_papers": all_papers,
     }

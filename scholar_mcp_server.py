@@ -22,7 +22,10 @@ from recommender import recommend_papers
 from citation_graph import get_citation_graph
 
 # ─── 环境变量 ───
-DS_KEY = os.environ.get("DS_KEY", "")
+# AI API 配置（兼容任意 OpenAI 格式 API：DeepSeek / OpenAI / Azure / Ollama 等）
+AI_API_BASE = os.environ.get("AI_API_BASE", "https://api.deepseek.com")  # 不带 /chat/completions
+AI_API_KEY = os.environ.get("AI_API_KEY", os.environ.get("DS_KEY", ""))  # 优先用 AI_API_KEY，兼容旧 DS_KEY
+AI_MODEL = os.environ.get("AI_MODEL", "deepseek-chat")
 CROSSREF = "https://api.crossref.org/works"
 
 # ─── MCP Server ───
@@ -79,7 +82,9 @@ def paper_search(query: str, rows: int = 8) -> str:
 
 @mcp.tool()
 def paper_ai_analyze(doi: str) -> str:
-    """使用 DeepSeek AI 分析论文，返回核心贡献、研究方法、关键发现等。
+    """使用 AI 分析论文，返回核心贡献、研究方法、关键发现等。
+
+    支持任意 OpenAI 兼容 API（通过 AI_API_BASE / AI_API_KEY / AI_MODEL 环境变量配置）。
 
     Args:
         doi: 论文的 DOI，例如 "10.1109/tim.2021.3106677"
@@ -87,8 +92,8 @@ def paper_ai_analyze(doi: str) -> str:
     Returns:
         AI 分析结果 JSON
     """
-    if not DS_KEY:
-        return json.dumps({"success": False, "error": "DS_KEY not set, AI analysis unavailable"})
+    if not AI_API_KEY:
+        return json.dumps({"success": False, "error": "AI_API_KEY (or DS_KEY) not set, AI analysis unavailable"})
 
     try:
         r = requests.get(f"{CROSSREF}/{requests.utils.quote(doi)}", timeout=10)
@@ -126,19 +131,21 @@ Provide:
 4. **创新点**: 与现有研究的区别
 5. **局限性**: 1-2点"""
 
+        # 兼容任意 OpenAI 格式 API
+        api_url = f"{AI_API_BASE.rstrip('/')}/chat/completions"
         ar = requests.post(
-            "https://api.deepseek.com/chat/completions",
+            api_url,
             headers={
-                "Authorization": f"Bearer {DS_KEY}",
+                "Authorization": f"Bearer {AI_API_KEY}",
                 "Content-Type": "application/json",
             },
             json={
-                "model": "deepseek-chat",
+                "model": AI_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
                 "max_tokens": 800,
             },
-            timeout=30,
+            timeout=60,
         )
         analysis = ar.json()["choices"][0]["message"]["content"]
 
@@ -148,6 +155,7 @@ Provide:
             "title": title,
             "authors": authors,
             "journal": f"{journal} ({year})",
+            "model": AI_MODEL,
             "analysis": analysis,
         }, ensure_ascii=False, indent=2)
 

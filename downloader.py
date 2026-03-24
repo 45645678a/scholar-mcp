@@ -30,6 +30,61 @@ def _safe_name(doi: str) -> str:
     return doi.replace("/", "_").replace(":", "_") + ".pdf"
 
 
+# 出版商 DOI 前缀 → PDF URL 模板
+# {doi} 会被替换为完整 DOI
+PUBLISHER_PDF_TEMPLATES = {
+    "10.1088/": "https://iopscience.iop.org/article/{doi}/pdf",          # IOP
+    "10.3390/": "https://www.mdpi.com/{doi}/pdf",                        # MDPI (非标准，走 DOI redirect)
+    "10.3389/": "https://doi.org/{doi}",                                 # Frontiers (OA, DOI redirect 到 PDF)
+    "10.1155/": "https://doi.org/{doi}",                                 # Hindawi (OA)
+    "10.1371/": "https://doi.org/{doi}",                                 # PLOS (OA)
+}
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/pdf,*/*",
+}
+
+
+def _try_publisher_oa(doi: str, timeout: int = 30) -> bytes | None:
+    """尝试从出版商网站直接下载 OA 论文 PDF"""
+    # 1. 已知出版商模板
+    for prefix, template in PUBLISHER_PDF_TEMPLATES.items():
+        if doi.startswith(prefix):
+            url = template.format(doi=doi)
+            try:
+                r = requests.get(url, timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
+                if r.content[:5] == b"%PDF-":
+                    return r.content
+            except Exception:
+                pass
+            break  # 只匹配第一个前缀
+
+    # 2. 通用: 通过 DOI redirect 看最终页面是否有 PDF
+    try:
+        r = requests.get(f"https://doi.org/{doi}", timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
+        if r.content[:5] == b"%PDF-":
+            return r.content
+        # 某些 OA 出版商在页面中有直接 PDF 链接
+        import re as _re
+        match = _re.search(
+            r'<a[^>]*href="([^"]*)"[^>]*>.*?(?:Download|PDF|Full.Text).*?</a>',
+            r.text[:20000], _re.IGNORECASE
+        )
+        if match:
+            pdf_link = match.group(1)
+            if not pdf_link.startswith("http"):
+                from urllib.parse import urljoin
+                pdf_link = urljoin(r.url, pdf_link)
+            pr = requests.get(pdf_link, timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
+            if pr.content[:5] == b"%PDF-":
+                return pr.content
+    except Exception:
+        pass
+
+    return None
+
+
 def _try_unpaywall(doi: str, timeout: int = 15) -> str | None:
     """通过 Unpaywall 查找合法开放获取 PDF 链接"""
     try:
@@ -55,7 +110,6 @@ def _try_scihub(doi: str, timeout: int = 30) -> bytes | None:
     """通过 Sci-Hub 镜像下载 PDF"""
     for mirror in SCIHUB_MIRRORS:
         try:
-            # 方法 1: 直接请求 DOI 页面
             url = f"{mirror}/{doi}"
             r = requests.get(url, timeout=timeout, allow_redirects=True)
 
@@ -64,30 +118,52 @@ def _try_scihub(doi: str, timeout: int = 30) -> bytes | None:
                 return r.content
 
             # 从 HTML 中提取 PDF 链接
-            # Sci-Hub 页面通常包含一个 iframe 或 embed 指向 PDF
             pdf_url = None
 
-            # 匹配 iframe src 或 embed src
+            # 方法 1: citation_pdf_url meta 标签（Sci-Hub 最常用的方式）
             match = re.search(
-                r'(?:iframe|embed)[^>]*src=["\'](.*?\.pdf[^"\']*)["\']',
+                r'name=["\']citation_pdf_url["\'][^>]*content=["\']([^"\']+)["\']',
                 r.text, re.IGNORECASE
             )
+            if not match:
+                match = re.search(
+                    r'content=["\']([^"\']+)["\'][^>]*name=["\']citation_pdf_url["\']',
+                    r.text, re.IGNORECASE
+                )
             if match:
                 pdf_url = match.group(1)
 
-            # 匹配带 onclick 的按钮
+            # 方法 2: /storage/ 路径的 href（Sci-Hub 存储路径）
             if not pdf_url:
                 match = re.search(
-                    r'location\.href\s*=\s*["\']([^"\']*\.pdf[^"\']*)["\']',
+                    r'href=["\']([^"\']*?/storage/[^"\']*\.pdf[^"\']*)["\']',
                     r.text, re.IGNORECASE
                 )
                 if match:
                     pdf_url = match.group(1)
 
-            # 匹配 <a> 中的 PDF 链接
+            # 方法 3: iframe/embed src（旧版 Sci-Hub 布局）
             if not pdf_url:
                 match = re.search(
-                    r'href=["\'](https?://[^"\']*\.pdf[^"\']*)["\']',
+                    r'(?:iframe|embed)[^>]*src=["\']([^"\']+)["\']',
+                    r.text, re.IGNORECASE
+                )
+                if match:
+                    pdf_url = match.group(1)
+
+            # 方法 4: 通用 .pdf href
+            if not pdf_url:
+                match = re.search(
+                    r'href=["\']([^"\']*\.pdf[^"\']*)["\']',
+                    r.text, re.IGNORECASE
+                )
+                if match:
+                    pdf_url = match.group(1)
+
+            # 方法 5: location.href 跳转
+            if not pdf_url:
+                match = re.search(
+                    r'location\.href\s*=\s*["\']([^"\']*\.pdf[^"\']*)["\']',
                     r.text, re.IGNORECASE
                 )
                 if match:
@@ -98,6 +174,8 @@ def _try_scihub(doi: str, timeout: int = 30) -> bytes | None:
                     pdf_url = "https:" + pdf_url
                 elif pdf_url.startswith("/"):
                     pdf_url = mirror + pdf_url
+                elif not pdf_url.startswith("http"):
+                    pdf_url = mirror + "/" + pdf_url
                 pr = requests.get(pdf_url, timeout=timeout)
                 if pr.content[:5] == b"%PDF-":
                     return pr.content
@@ -200,7 +278,20 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
         except Exception:
             pass
 
-    # 2. arXiv
+    # 2. Publisher OA (IOP, MDPI, Frontiers 等出版商直链)
+    pub_data = _try_publisher_oa(doi)
+    if pub_data:
+        with open(output, "wb") as f:
+            f.write(pub_data)
+        return {
+            "success": True,
+            "doi": doi,
+            "path": os.path.abspath(output),
+            "size_mb": round(len(pub_data) / 1024 / 1024, 2),
+            "source": "publisher_oa",
+        }
+
+    # 3. arXiv
     arxiv_data = _try_arxiv(doi)
     if arxiv_data:
         with open(output, "wb") as f:

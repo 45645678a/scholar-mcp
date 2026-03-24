@@ -4,6 +4,7 @@ Local academic paper tool MCP server — **9-source search**, multi-source downl
 
 [![PyPI](https://img.shields.io/pypi/v/scholar-mcp-server)](https://pypi.org/project/scholar-mcp-server/)
 [![Python](https://img.shields.io/pypi/pyversions/scholar-mcp-server)](https://pypi.org/project/scholar-mcp-server/)
+[![Tests](https://github.com/45645678a/scholar-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/45645678a/scholar-mcp/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/45645678a/scholar-mcp)](LICENSE)
 
 ## Quick Install
@@ -19,13 +20,26 @@ That's it. Restart your IDE and start using it.
 
 | Tool | Description |
 |---|---|
-| `paper_search` | 9-source concurrent search: Semantic Scholar, OpenAlex, Crossref, PubMed, arXiv, CORE, Europe PMC, DOAJ, dblp |
+| `paper_search` | 9-source concurrent search with relevance scoring (Semantic Scholar, OpenAlex, Crossref, PubMed, arXiv, CORE, Europe PMC, DOAJ, dblp) |
 | `paper_download` | Multi-source PDF download: Unpaywall → Publisher OA → arXiv → Sci-Hub → scidownl |
 | `paper_batch_download` | Batch download multiple papers by DOI list |
 | `paper_ai_analyze` | AI analysis — downloads PDF, extracts full text (up to 20 pages / 12k chars), sends to any OpenAI-compatible API |
-| `paper_recommend` | Scan your workspace code → auto-recommend related papers |
+| `paper_recommend` | Scan your workspace code → multi-query auto-recommend related papers |
 | `paper_citation_graph` | Generate Mermaid citation/reference network visualization |
 | `paper_health` | Check download source availability |
+
+### Search Quality
+
+Search results are ranked by a **4-factor composite score**:
+
+| Factor | Weight | Description |
+|---|---|---|
+| Query relevance | 0–40 | Title + abstract term matching |
+| Citation impact | 0–30 | Log-scaled citation count |
+| Source quality | 0–10 | Data source reliability weighting |
+| Year recency | 0–15 | Boost for recent publications |
+
+Deduplication uses **DOI matching + Jaccard title similarity** (≥0.7 threshold) across all 9 sources. Each source connector has built-in **retry with exponential backoff**.
 
 ## AI Analysis
 
@@ -72,6 +86,15 @@ All free, no API keys required:
 | Europe PMC | European biomedical |
 | DOAJ | Open Access journals |
 | dblp | Computer Science |
+
+## Development
+
+```bash
+pip install .[all] pytest
+pytest tests/ -v
+```
+
+40 tests covering search dedup, download chain, keyword extraction, and connector mocking.
 
 ## ⚠️ Disclaimer
 

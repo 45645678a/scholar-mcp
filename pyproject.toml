@@ -4,23 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scholar-mcp-server"
-version = "0.3.1"
+version = "0.3.2"
 description = "Local academic paper MCP server — 9-source search, multi-source download, AI analysis, citation graph, code-based paper recommendation"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [{name = "45645678a"}]
-keywords = ["mcp", "academic", "paper", "scholar", "download", "sci-hub", "arxiv", "ai", "semantic-scholar", "openalex"]
+keywords = ["mcp", "academic", "paper", "scholar", "download", "sci-hub", "arxiv", "ai", "semantic-scholar", "openalex", "research", "citation"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: General",
 ]
 
 dependencies = [

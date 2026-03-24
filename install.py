@@ -196,8 +196,16 @@ def _read_config(path: Path) -> dict:
 
 
 def _write_config(path: Path, config: dict):
-    """写入 JSON 配置文件"""
+    """写入 JSON 配置文件（写前自动备份）"""
     path.parent.mkdir(parents=True, exist_ok=True)
+    # 写前备份原文件
+    if path.exists():
+        backup = path.with_suffix(path.suffix + ".bak")
+        try:
+            import shutil as _shutil
+            _shutil.copy2(path, backup)
+        except Exception:
+            pass  # 备份失败不阻止写入
     path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
 
 

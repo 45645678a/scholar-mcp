@@ -5,8 +5,23 @@
 """
 
 import re
+import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _retry_request(method, url, retries=2, backoff=1.0, **kwargs):
+    """带指数退避重试的 HTTP 请求"""
+    kwargs.setdefault("timeout", 15)
+    for i in range(retries + 1):
+        try:
+            r = method(url, **kwargs)
+            r.raise_for_status()
+            return r
+        except (requests.RequestException, Exception):
+            if i >= retries:
+                raise
+            time.sleep(backoff * (2 ** i))
 
 # ─── 统一 Paper 格式 ───
 
@@ -382,30 +397,67 @@ ALL_CONNECTORS = {
 }
 
 
+def _normalize_title(title: str) -> str:
+    """标题归一化：小写、去标点、去多余空格"""
+    import re as _re
+    t = title.lower().strip()
+    t = _re.sub(r'[^\w\s]', ' ', t)
+    return ' '.join(t.split())
+
+
+def _jaccard_sim(a: str, b: str) -> float:
+    """计算两个标题的 Jaccard 相似度（基于单词集合）"""
+    sa = set(a.split())
+    sb = set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
 def _merge_results(all_sources: list[list[dict]], limit: int) -> list[dict]:
-    by_key = {}
+    """合并去重：DOI 精确匹配 + 标题 Jaccard 相似度 (≥0.7) 模糊匹配"""
+    merged = []  # list of merged papers
+
     for source_results in all_sources:
         for r in source_results:
-            key = r.get("doi") or r["title"].lower().strip()[:80]
-            if not key:
+            doi = (r.get("doi") or "").strip().lower()
+            title_norm = _normalize_title(r.get("title") or "")
+            if not title_norm:
                 continue
-            if key in by_key:
-                existing = by_key[key]
-                if not existing.get("abstract") and r.get("abstract"):
-                    existing["abstract"] = r["abstract"]
-                if not existing.get("authors") and r.get("authors"):
-                    existing["authors"] = r["authors"]
-                if not existing.get("open_access_url") and r.get("open_access_url"):
-                    existing["open_access_url"] = r["open_access_url"]
-                existing["cited_by"] = max(existing.get("cited_by", 0), r.get("cited_by", 0))
-            else:
-                by_key[key] = r
 
-    merged = sorted(
-        by_key.values(),
+            # 查找是否已有重复
+            found = None
+            for existing in merged:
+                edoi = (existing.get("doi") or "").strip().lower()
+                # DOI 精确匹配
+                if doi and edoi and doi == edoi:
+                    found = existing
+                    break
+                # 标题 Jaccard 相似度匹配
+                etitle = _normalize_title(existing.get("title") or "")
+                if _jaccard_sim(title_norm, etitle) >= 0.7:
+                    found = existing
+                    break
+
+            if found:
+                # 合并补充信息
+                if not found.get("abstract") and r.get("abstract"):
+                    found["abstract"] = r["abstract"]
+                if not found.get("authors") and r.get("authors"):
+                    found["authors"] = r["authors"]
+                if not found.get("open_access_url") and r.get("open_access_url"):
+                    found["open_access_url"] = r["open_access_url"]
+                if not found.get("doi") and r.get("doi"):
+                    found["doi"] = r["doi"]
+                found["cited_by"] = max(found.get("cited_by", 0), r.get("cited_by", 0))
+            else:
+                merged.append(r)
+
+    merged.sort(
         key=lambda x: (x.get("cited_by", 0), int(x.get("year") or "0")),
         reverse=True,
-    )[:limit]
+    )
+    merged = merged[:limit]
 
     for i, r in enumerate(merged):
         r["index"] = i + 1
@@ -433,9 +485,19 @@ def search_papers(query: str, rows: int = 8) -> dict:
     sources_fail = []
     fetch_rows = min(rows * 2, 20)
 
+    def _call_with_retry(fn, query, rows, retries=1):
+        """单 connector 带重试调用"""
+        for i in range(retries + 1):
+            try:
+                return fn(query, rows)
+            except Exception:
+                if i >= retries:
+                    raise
+                time.sleep(1.0 * (2 ** i))
+
     with ThreadPoolExecutor(max_workers=9) as executor:
         futures = {
-            executor.submit(fn, query, fetch_rows): name
+            executor.submit(_call_with_retry, fn, query, fetch_rows): name
             for name, fn in ALL_CONNECTORS.items()
         }
         for future in as_completed(futures, timeout=25):

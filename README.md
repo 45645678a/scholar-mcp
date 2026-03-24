@@ -20,9 +20,9 @@ That's it. Restart your IDE and start using it.
 | Tool | Description |
 |---|---|
 | `paper_search` | 9-source concurrent search: Semantic Scholar, OpenAlex, Crossref, PubMed, arXiv, CORE, Europe PMC, DOAJ, dblp |
-| `paper_download` | Multi-source PDF download: Unpaywall → Publisher OA → Sci-Hub → arXiv |
+| `paper_download` | Multi-source PDF download: Unpaywall → Publisher OA → arXiv → Sci-Hub → scidownl |
 | `paper_batch_download` | Batch download multiple papers by DOI list |
-| `paper_ai_analyze` | AI full-text analysis — downloads PDF, extracts text, sends to any OpenAI-compatible API |
+| `paper_ai_analyze` | AI analysis — downloads PDF, extracts full text (up to 20 pages / 12k chars), sends to any OpenAI-compatible API |
 | `paper_recommend` | Scan your workspace code → auto-recommend related papers |
 | `paper_citation_graph` | Generate Mermaid citation/reference network visualization |
 | `paper_health` | Check download source availability |
@@ -72,6 +72,10 @@ All free, no API keys required:
 | Europe PMC | European biomedical |
 | DOAJ | Open Access journals |
 | dblp | Computer Science |
+
+## ⚠️ Disclaimer
+
+This tool includes optional Sci-Hub integration for personal academic use. Sci-Hub may be illegal in some jurisdictions. **Users are solely responsible for ensuring compliance with local laws and institutional policies.** The authors do not endorse copyright infringement. If you are in a compliance-sensitive environment (university, company, lab), consult your institution's policy before using the Sci-Hub download source.
 
 ## License
 

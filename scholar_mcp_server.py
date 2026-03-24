@@ -1,7 +1,7 @@
 """Scholar MCP Server — 本地论文工具 MCP 服务器
 
-提供论文下载(Sci-Hub/arXiv/Unpaywall)、搜索、AI分析、代码推荐、引用图谱功能。
-所有下载在本地执行，无需远程 API。
+提供 9 源并发论文搜索、多源 PDF 下载、AI 全文分析、代码推荐、引用图谱功能。
+所有操作在本地执行，搜索 API 均免费无需 Key。
 
 启动方式 (stdio):
     python scholar_mcp_server.py
@@ -36,7 +36,7 @@ mcp = FastMCP("scholar-local")
 
 @mcp.tool()
 def paper_download(doi: str, output_dir: str = ".") -> str:
-    """通过 DOI 下载一篇论文 PDF（本地多源下载：Unpaywall → arXiv → Sci-Hub）。
+    """通过 DOI 下载一篇论文 PDF（本地多源下载：Unpaywall → Publisher OA → arXiv → Sci-Hub → scidownl）。
 
     Args:
         doi: 论文的 DOI，例如 "10.1109/tim.2021.3106677"
@@ -66,7 +66,7 @@ def paper_batch_download(dois: list[str], output_dir: str = ".") -> str:
 
 @mcp.tool()
 def paper_search(query: str, rows: int = 8) -> str:
-    """搜索论文 (Crossref + Semantic Scholar 双源合并去重)。
+    """搜索论文 (9 源并发：Semantic Scholar / OpenAlex / Crossref / PubMed / arXiv / CORE / Europe PMC / DOAJ / dblp)。
 
     支持关键词搜索或直接输入 DOI 查询详情。
 
@@ -86,7 +86,7 @@ def paper_ai_analyze(doi: str) -> str:
     """使用 AI 分析论文，返回核心贡献、研究方法、关键发现等。
 
     支持任意 OpenAI 兼容 API（通过 AI_API_BASE / AI_API_KEY / AI_MODEL 环境变量配置）。
-    如果能下载到 PDF，会提取全文进行深度分析；否则退回到 abstract 分析。
+    如果能下载到 PDF，会提取全文（最多 20 页、12000 字符）进行深度分析；否则退回到 abstract 分析。
 
     Args:
         doi: 论文的 DOI，例如 "10.1109/tim.2021.3106677"

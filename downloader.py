@@ -1,6 +1,6 @@
 """多源论文下载引擎 — 本地直连，无需远程 API
 
-下载源优先级：Unpaywall (合法OA) → Sci-Hub → arXiv
+下载源优先级：Unpaywall (合法OA) → Publisher OA → arXiv → Sci-Hub → scidownl
 """
 
 import os

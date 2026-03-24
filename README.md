@@ -27,19 +27,9 @@ That's it. Restart your IDE and start using it.
 | `paper_citation_graph` | Generate Mermaid citation/reference network visualization |
 | `paper_health` | Check download source availability |
 
-## AI Analysis Setup
+## AI Analysis
 
-`paper_ai_analyze` works with **any OpenAI-compatible API** — use your preferred provider:
-
-| Provider | `AI_API_BASE` | `AI_MODEL` |
-|---|---|---|
-| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
-| Local (Ollama) | `http://localhost:11434/v1` | `llama3` |
-| Azure OpenAI | `https://your-resource.openai.azure.com/openai/deployments/your-model` | `gpt-4o` |
-| Any compatible | Your endpoint | Your model |
-
-Set these via environment variables or in your IDE's MCP config.
+`paper_ai_analyze` works with **any OpenAI-compatible API**. Set `AI_API_BASE`, `AI_API_KEY`, and `AI_MODEL` to point to your preferred provider.
 
 ## Alternative Install (Git Clone)
 

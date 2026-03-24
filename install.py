@@ -81,6 +81,75 @@ def _server_entry():
     return entry
 
 
+# ─── PATH 自动修复 ───
+
+def fix_path():
+    """检测 scholar-mcp 命令是否可用，不可用则尝试将 Python Scripts 目录加入 PATH"""
+    if shutil.which("scholar-mcp"):
+        return  # 已在 PATH 中
+
+    # 查找 pip --user 安装的 Scripts 目录
+    import site
+    user_scripts = Path(site.getusersitepackages()).parent / "Scripts"
+    if not user_scripts.exists():
+        # 尝试常见路径
+        for p in Path.home().glob("AppData/Roaming/Python/*/Scripts"):
+            if (p / "scholar-mcp.exe").exists() or (p / "scholar-mcp").exists():
+                user_scripts = p
+                break
+
+    scholar_exe = user_scripts / ("scholar-mcp.exe" if sys.platform == "win32" else "scholar-mcp")
+    if not scholar_exe.exists():
+        return  # 找不到，跳过
+
+    scripts_dir = str(user_scripts)
+    print(f"\n🔧 检测到 scholar-mcp 不在 PATH 中")
+    print(f"   脚本目录: {scripts_dir}")
+
+    if sys.platform == "win32":
+        # Windows: 永久添加到用户 PATH
+        import winreg
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment", 0, winreg.KEY_ALL_ACCESS)
+            try:
+                current_path, _ = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current_path = ""
+            if scripts_dir.lower() not in current_path.lower():
+                new_path = f"{current_path};{scripts_dir}" if current_path else scripts_dir
+                winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, new_path)
+                winreg.CloseKey(key)
+                # 通知系统 PATH 已更新
+                import ctypes
+                HWND_BROADCAST = 0xFFFF
+                WM_SETTINGCHANGE = 0x1A
+                ctypes.windll.user32.SendMessageTimeoutW(
+                    HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment", 2, 5000, None
+                )
+                print(f"   ✅ 已自动添加到用户 PATH（新终端生效）")
+            else:
+                print(f"   ✅ 已在 PATH 中（当前终端可能需要重启）")
+        except Exception as e:
+            print(f"   ⚠️  无法自动添加 PATH: {e}")
+            print(f"   请手动添加: {scripts_dir}")
+    else:
+        # Linux/macOS
+        shell_rc = Path.home() / (".zshrc" if os.path.exists(Path.home() / ".zshrc") else ".bashrc")
+        export_line = f'export PATH="{scripts_dir}:$PATH"'
+        try:
+            content = shell_rc.read_text() if shell_rc.exists() else ""
+            if scripts_dir not in content:
+                with open(shell_rc, "a") as f:
+                    f.write(f"\n# Scholar MCP\n{export_line}\n")
+                print(f"   ✅ 已添加到 {shell_rc.name}（source {shell_rc.name} 或重开终端生效）")
+        except Exception as e:
+            print(f"   ⚠️  无法自动添加: {e}")
+            print(f"   请手动添加: {export_line}")
+
+    # 临时加入当前进程 PATH
+    os.environ["PATH"] = scripts_dir + os.pathsep + os.environ.get("PATH", "")
+
+
 # ─── 安装依赖 ───
 
 def install_deps():
@@ -221,6 +290,9 @@ def main():
     # 安装依赖
     if not args.skip_deps:
         install_deps()
+
+    # 自动修复 PATH
+    fix_path()
 
     # 验证
     if not verify():

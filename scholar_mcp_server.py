@@ -20,6 +20,7 @@ from downloader import download_paper, batch_download, health_check
 from searcher import search_papers
 from recommender import recommend_papers
 from citation_graph import get_citation_graph
+from pdf_reader import extract_text as extract_pdf_text
 
 # ─── 环境变量 ───
 # AI API 配置（兼容任意 OpenAI 格式 API：DeepSeek / OpenAI / Azure / Ollama 等）
@@ -85,6 +86,7 @@ def paper_ai_analyze(doi: str) -> str:
     """使用 AI 分析论文，返回核心贡献、研究方法、关键发现等。
 
     支持任意 OpenAI 兼容 API（通过 AI_API_BASE / AI_API_KEY / AI_MODEL 环境变量配置）。
+    如果能下载到 PDF，会提取全文进行深度分析；否则退回到 abstract 分析。
 
     Args:
         doi: 论文的 DOI，例如 "10.1109/tim.2021.3106677"
@@ -96,6 +98,7 @@ def paper_ai_analyze(doi: str) -> str:
         return json.dumps({"success": False, "error": "AI_API_KEY (or DS_KEY) not set, AI analysis unavailable"})
 
     try:
+        # 获取论文元数据
         r = requests.get(f"{CROSSREF}/{requests.utils.quote(doi)}", timeout=10)
         if r.status_code != 200:
             return json.dumps({"success": False, "error": f"DOI not found: {doi}"})
@@ -112,12 +115,48 @@ def paper_ai_analyze(doi: str) -> str:
             year = str(item["published"]["date-parts"][0][0])
         abstract = (
             (item.get("abstract") or "")
-            .replace("<jats:p>", "")
-            .replace("</jats:p>", "")
+            .replace("<jats:p>", "").replace("</jats:p>", "")
             .strip()
         )
 
-        prompt = f"""You are an academic research assistant. Analyze this paper concisely in Chinese.
+        # 尝试获取全文：下载 PDF → 提取文本
+        full_text = ""
+        analysis_mode = "abstract_only"
+        import tempfile
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="scholar_mcp_")
+            dl_result = download_paper(doi, tmp_dir)
+            if dl_result.get("success") and dl_result.get("path"):
+                pdf_result = extract_pdf_text(dl_result["path"], max_pages=20, max_chars=12000)
+                if pdf_result.get("success"):
+                    full_text = pdf_result["text"]
+                    analysis_mode = f"full_text ({pdf_result['pages']} pages, {pdf_result['chars']} chars, {pdf_result['method']})"
+        except Exception:
+            pass
+
+        # 构建 prompt
+        if full_text:
+            prompt = f"""You are an academic research assistant. Analyze this paper thoroughly in Chinese based on the full text provided.
+
+Title: {title}
+Authors: {authors}
+Journal: {journal} ({year})
+
+--- FULL TEXT ---
+{full_text}
+--- END ---
+
+Provide a thorough analysis:
+1. **核心贡献**: 一句话概括
+2. **研究背景**: 为什么做这个研究（2-3句）
+3. **研究方法**: 详细描述使用的方法和技术路线（3-5句）
+4. **关键发现**: 3-5个具体的定量或定性结果
+5. **创新点**: 与现有研究的具体区别
+6. **局限性**: 2-3点
+7. **应用前景**: 1-2句"""
+            max_tokens = 1500
+        else:
+            prompt = f"""You are an academic research assistant. Analyze this paper concisely in Chinese.
 
 Title: {title}
 Authors: {authors}
@@ -130,8 +169,9 @@ Provide:
 3. **关键发现**: 2-3个要点
 4. **创新点**: 与现有研究的区别
 5. **局限性**: 1-2点"""
+            max_tokens = 800
 
-        # 兼容任意 OpenAI 格式 API
+        # 调用 AI API
         api_url = f"{AI_API_BASE.rstrip('/')}/chat/completions"
         ar = requests.post(
             api_url,
@@ -143,9 +183,9 @@ Provide:
                 "model": AI_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,
-                "max_tokens": 800,
+                "max_tokens": max_tokens,
             },
-            timeout=60,
+            timeout=120,
         )
         analysis = ar.json()["choices"][0]["message"]["content"]
 
@@ -156,6 +196,7 @@ Provide:
             "authors": authors,
             "journal": f"{journal} ({year})",
             "model": AI_MODEL,
+            "analysis_mode": analysis_mode,
             "analysis": analysis,
         }, ensure_ascii=False, indent=2)
 
@@ -211,5 +252,10 @@ def paper_health() -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for CLI and PyPI."""
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

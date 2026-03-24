@@ -1,3 +1,7 @@
 mcp>=1.0.0
 requests>=2.31.0
-scidownl>=1.0.2
+# Optional (PDF full-text extraction, install one):
+# pymupdf>=1.23.0
+# pdfplumber>=0.10.0
+# Optional (Sci-Hub fallback):
+# scidownl>=1.0.2

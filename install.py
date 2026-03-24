@@ -14,6 +14,7 @@ import sys
 import json
 import subprocess
 import argparse
+import shutil
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -55,15 +56,29 @@ IDE_CONFIGS = {
 MCP_KEY = "scholar-mcp"
 
 def _server_entry():
-    """生成 MCP 服务器配置条目"""
-    return {
-        "command": "python",
-        "args": [str(SERVER_SCRIPT)],
-        "env": {
-            "DS_KEY": os.environ.get("DS_KEY", ""),
-            "UNPAYWALL_EMAIL": os.environ.get("UNPAYWALL_EMAIL", "scholar-mcp@example.com"),
-        },
+    """生成 MCP 服务器配置条目 — 自动检测 pip 安装 vs 本地 git clone"""
+    # 检测是否通过 pip 安装（scholar-mcp 命令可用）
+    scholar_cmd = shutil.which("scholar-mcp")
+    if scholar_cmd:
+        # pip 安装模式：直接用 CLI 命令
+        entry = {
+            "command": "scholar-mcp",
+            "args": [],
+        }
+    else:
+        # 本地 git clone 模式：用 python 执行脚本
+        entry = {
+            "command": "python",
+            "args": [str(SERVER_SCRIPT)],
+        }
+
+    entry["env"] = {
+        "AI_API_KEY": os.environ.get("AI_API_KEY", os.environ.get("DS_KEY", "")),
+        "AI_API_BASE": os.environ.get("AI_API_BASE", "https://api.deepseek.com"),
+        "AI_MODEL": os.environ.get("AI_MODEL", "deepseek-chat"),
+        "UNPAYWALL_EMAIL": os.environ.get("UNPAYWALL_EMAIL", "scholar-mcp@example.com"),
     }
+    return entry
 
 
 # ─── 安装依赖 ───

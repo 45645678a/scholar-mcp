@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scholar-mcp-server"
-version = "0.2.0"
-description = "Local academic paper tool MCP server — search, download, AI analysis, citation graph"
+version = "0.3.0"
+description = "Local academic paper MCP server — 9-source search, multi-source download, AI analysis, citation graph, code-based paper recommendation"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [{name = "45645678a"}]
-keywords = ["mcp", "academic", "paper", "scholar", "download", "sci-hub", "arxiv", "ai"]
+keywords = ["mcp", "academic", "paper", "scholar", "download", "sci-hub", "arxiv", "ai", "semantic-scholar", "openalex"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -36,6 +36,7 @@ all = ["pymupdf>=1.23.0", "scidownl>=1.0.2"]
 
 [project.scripts]
 scholar-mcp = "scholar_mcp_server:main"
+scholar-mcp-install = "install:main"
 
 [project.urls]
 Homepage = "https://github.com/45645678a/scholar-mcp"
@@ -49,4 +50,5 @@ py-modules = [
     "recommender",
     "citation_graph",
     "pdf_reader",
+    "install",
 ]

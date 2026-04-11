@@ -44,8 +44,8 @@ scholar-mcp = "scholar_mcp_server:main"
 scholar-mcp-install = "install:main"
 
 [project.urls]
-Homepage = "https://github.com/45645678a/scholar-mcp"
-Repository = "https://github.com/45645678a/scholar-mcp"
+Homepage = "https://github.com/45645678a/Scholar-mcp"
+Repository = "https://github.com/45645678a/Scholar-mcp"
 
 [tool.setuptools]
 py-modules = [

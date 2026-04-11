@@ -1,8 +1,6 @@
 """Tests for searcher.py — connectors, dedup, and search quality."""
-import json
 import sys
 import os
-import pytest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

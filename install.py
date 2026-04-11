@@ -108,7 +108,7 @@ def fix_path():
         return  # 找不到，跳过
 
     scripts_dir = str(user_scripts)
-    print(f"\n[PATH] scholar-mcp not in PATH")
+    print("\n[PATH] scholar-mcp not in PATH")
     print(f"  Scripts dir: {scripts_dir}")
 
     if sys.platform == "win32":
@@ -156,9 +156,9 @@ def _fix_path_windows(scripts_dir: str):
                 )
             except Exception:
                 pass
-            print(f"  [OK] Added to user PATH (restart terminal to take effect)")
+            print("  [OK] Added to user PATH (restart terminal to take effect)")
         else:
-            print(f"  [OK] Already in PATH (current terminal may need restart)")
+            print("  [OK] Already in PATH (current terminal may need restart)")
     except PermissionError:
         print(f"  [!] No permission to write PATH. Run as administrator or add manually: {scripts_dir}")
     except Exception as e:
@@ -207,10 +207,10 @@ def install_deps():
 
     # scidownl 是可选的
     try:
-        import scidownl
-        print(f"  [OK] scidownl (optional, installed)")
+        import scidownl  # noqa: F401
+        print("  [OK] scidownl (optional, installed)")
     except ImportError:
-        print(f"  [--] scidownl (optional, skipped)")
+        print("  [--] scidownl (optional, skipped)")
 
 
 # ─── MCP 注册 ───
@@ -365,7 +365,7 @@ def main():
 
     # 检测 IDE
     detected = detect_ides()
-    print(f"\n[DETECT] Found IDEs:")
+    print("\n[DETECT] Found IDEs:")
     for ide_id in detected:
         print(f"  - {IDE_CONFIGS[ide_id]['name']}")
     if not detected:
@@ -378,11 +378,11 @@ def main():
         targets = args.ide
     else:
         # 交互模式
-        print(f"\nAvailable IDEs:")
+        print("\nAvailable IDEs:")
         for i, ide_id in enumerate(detected):
             print(f"  [{i+1}] {IDE_CONFIGS[ide_id]['name']}")
-        print(f"  [a] All")
-        print(f"  [q] Skip")
+        print("  [a] All")
+        print("  [q] Skip")
 
         choice = input("\nSelect (Enter=all): ").strip().lower()
         if choice == "q":
@@ -399,7 +399,7 @@ def main():
 
     # 注册
     if targets:
-        print(f"\n[REGISTER] Writing MCP config...")
+        print("\n[REGISTER] Writing MCP config...")
         for ide_id in targets:
             try:
                 register_ide(ide_id)
@@ -412,11 +412,11 @@ def main():
     print("\n" + "=" * 50)
     print("  Installation complete! Restart IDE to use.")
     print("=" * 50)
-    print(f"\n  Usage examples:")
-    print(f'   "search papers about transformer"')
-    print(f'   "download 10.1038/s41586-021-03819-2"')
-    print(f'   "analyze my code, recommend papers"')
-    print(f'   "generate citation graph for this paper"')
+    print("\n  Usage examples:")
+    print('   "search papers about transformer"')
+    print('   "download 10.1038/s41586-021-03819-2"')
+    print('   "analyze my code, recommend papers"')
+    print('   "generate citation graph for this paper"')
 
 
 if __name__ == "__main__":

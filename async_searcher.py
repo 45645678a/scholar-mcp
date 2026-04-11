@@ -6,10 +6,14 @@
 
 import asyncio
 import re
-import math
-import datetime
 
+import cache as _cache
 from logger import get_logger
+from searcher import (
+    _paper,
+    _merge_and_rank,
+    _reconstruct_abstract,
+)
 
 log = get_logger("async_searcher")
 
@@ -19,18 +23,6 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
     log.debug("aiohttp not installed, async search unavailable")
-
-
-# 复用 searcher.py 的工具函数
-from searcher import (
-    _paper,
-    _normalize_title,
-    _jaccard_sim,
-    _merge_results,
-    _merge_and_rank,
-    _reconstruct_abstract,
-)
-import cache as _cache
 
 
 async def _fetch_json(session: "aiohttp.ClientSession", url: str,

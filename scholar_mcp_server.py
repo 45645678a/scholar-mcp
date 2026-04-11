@@ -25,7 +25,6 @@ from recommender import recommend_papers
 from citation_graph import get_citation_graph
 from pdf_reader import extract_text as extract_pdf_text
 from translator import translate_text, translate_pdf
-from cache import stats as cache_stats, clear_all as cache_clear
 from logger import get_logger
 
 log = get_logger("server")

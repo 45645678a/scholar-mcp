@@ -1,7 +1,6 @@
 """Tests for cache.py — SQLite search cache."""
 import sys
 import os
-import time
 import pytest
 from unittest.mock import patch
 

@@ -1,7 +1,6 @@
 """Tests for recommender.py — keyword extraction and query building."""
 import sys
 import os
-import pytest
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -10,7 +9,6 @@ from recommender import (
     _scan_directory,
     _build_query,
     recommend_papers,
-    LIBRARY_TO_KEYWORDS,
     PY_IMPORT_RE,
     ACADEMIC_TERMS_RE,
 )

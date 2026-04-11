@@ -5,7 +5,6 @@
 """
 
 import os
-import json
 import requests
 
 from pdf_reader import extract_text

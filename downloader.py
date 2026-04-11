@@ -5,7 +5,6 @@
 
 import os
 import re
-import json
 import requests
 from urllib.parse import urljoin
 

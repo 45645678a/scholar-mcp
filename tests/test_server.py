@@ -2,7 +2,6 @@
 import sys
 import os
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

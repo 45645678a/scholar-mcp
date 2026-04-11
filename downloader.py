@@ -7,6 +7,11 @@ import os
 import re
 import json
 import requests
+from urllib.parse import urljoin
+
+from logger import get_logger
+
+log = get_logger("downloader")
 
 # Sci-Hub 镜像列表（按可用性排序，可随时更新）
 SCIHUB_MIRRORS = [
@@ -24,10 +29,19 @@ ARXIV_ABS_BASE = "https://arxiv.org/abs/"
 ARXIV_ID_RE = re.compile(r"(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)", re.IGNORECASE)
 ARXIV_OLD_RE = re.compile(r"(?:arXiv:)?([a-z\-]+/\d{7}(?:v\d+)?)", re.IGNORECASE)
 
+# 文件名不安全字符（Windows + Unix 通用）
+_UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
 
 def _safe_name(doi: str) -> str:
-    """DOI -> 安全文件名"""
-    return doi.replace("/", "_").replace(":", "_") + ".pdf"
+    """DOI -> 安全文件名，处理所有平台的特殊字符"""
+    name = _UNSAFE_FILENAME_RE.sub('_', doi)
+    # 避免 Windows 保留名称
+    if name.upper().split('.')[0] in ('CON', 'PRN', 'AUX', 'NUL',
+                                       'COM1', 'COM2', 'COM3', 'COM4',
+                                       'LPT1', 'LPT2', 'LPT3', 'LPT4'):
+        name = '_' + name
+    return name + ".pdf"
 
 
 # 出版商 DOI 前缀 → PDF URL 模板
@@ -46,6 +60,11 @@ BROWSER_HEADERS = {
 }
 
 
+def _is_valid_pdf(data: bytes) -> bool:
+    """检查数据是否是有效 PDF（检查文件头）"""
+    return len(data) > 1024 and data[:5] == b"%PDF-"
+
+
 def _try_publisher_oa(doi: str, timeout: int = 30) -> bytes | None:
     """尝试从出版商网站直接下载 OA 论文 PDF"""
     # 1. 已知出版商模板
@@ -54,7 +73,8 @@ def _try_publisher_oa(doi: str, timeout: int = 30) -> bytes | None:
             url = template.format(doi=doi)
             try:
                 r = requests.get(url, timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
-                if r.content[:5] == b"%PDF-":
+                if _is_valid_pdf(r.content):
+                    log.info("publisher OA hit: %s", prefix)
                     return r.content
             except Exception:
                 pass
@@ -63,21 +83,19 @@ def _try_publisher_oa(doi: str, timeout: int = 30) -> bytes | None:
     # 2. 通用: 通过 DOI redirect 看最终页面是否有 PDF
     try:
         r = requests.get(f"https://doi.org/{doi}", timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
-        if r.content[:5] == b"%PDF-":
+        if _is_valid_pdf(r.content):
             return r.content
         # 某些 OA 出版商在页面中有直接 PDF 链接
-        import re as _re
-        match = _re.search(
+        match = re.search(
             r'<a[^>]*href="([^"]*)"[^>]*>.*?(?:Download|PDF|Full.Text).*?</a>',
-            r.text[:20000], _re.IGNORECASE
+            r.text[:20000], re.IGNORECASE
         )
         if match:
             pdf_link = match.group(1)
             if not pdf_link.startswith("http"):
-                from urllib.parse import urljoin
                 pdf_link = urljoin(r.url, pdf_link)
             pr = requests.get(pdf_link, timeout=timeout, allow_redirects=True, headers=BROWSER_HEADERS)
-            if pr.content[:5] == b"%PDF-":
+            if _is_valid_pdf(pr.content):
                 return pr.content
     except Exception:
         pass
@@ -101,8 +119,8 @@ def _try_unpaywall(doi: str, timeout: int = 15) -> str | None:
             pdf_url = loc.get("url_for_pdf") or loc.get("url")
             if pdf_url:
                 return pdf_url
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("unpaywall failed for %s: %s", doi, e)
     return None
 
 
@@ -114,7 +132,8 @@ def _try_scihub(doi: str, timeout: int = 30) -> bytes | None:
             r = requests.get(url, timeout=timeout, allow_redirects=True)
 
             # 如果直接返回 PDF
-            if r.content[:5] == b"%PDF-":
+            if _is_valid_pdf(r.content):
+                log.info("sci-hub direct PDF: %s", mirror)
                 return r.content
 
             # 从 HTML 中提取 PDF 链接
@@ -177,11 +196,14 @@ def _try_scihub(doi: str, timeout: int = 30) -> bytes | None:
                 elif not pdf_url.startswith("http"):
                     pdf_url = mirror + "/" + pdf_url
                 pr = requests.get(pdf_url, timeout=timeout)
-                if pr.content[:5] == b"%PDF-":
+                if _is_valid_pdf(pr.content):
+                    log.info("sci-hub extracted PDF: %s", mirror)
                     return pr.content
-        except (requests.Timeout, requests.ConnectionError):
+        except (requests.Timeout, requests.ConnectionError) as e:
+            log.debug("sci-hub %s connection error: %s", mirror, e)
             continue
-        except Exception:
+        except Exception as e:
+            log.debug("sci-hub %s error: %s", mirror, e)
             continue
     return None
 
@@ -200,8 +222,10 @@ def _try_scidownl(doi: str, output_dir: str, timeout: int = 60) -> str | None:
                     return out_file
             # 不是有效 PDF，删除
             os.remove(out_file)
-    except Exception:
-        pass
+    except ImportError:
+        log.debug("scidownl not installed, skipping")
+    except Exception as e:
+        log.debug("scidownl failed for %s: %s", doi, e)
     return None
 
 
@@ -234,18 +258,23 @@ def _try_arxiv(identifier: str, timeout: int = 30) -> bytes | None:
     try:
         url = f"{ARXIV_PDF_BASE}{arxiv_id}"
         r = requests.get(url, timeout=timeout, allow_redirects=True)
-        if r.status_code == 200 and r.content[:5] == b"%PDF-":
+        if r.status_code == 200 and _is_valid_pdf(r.content):
+            log.info("arxiv download OK: %s", arxiv_id)
             return r.content
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("arxiv download failed for %s: %s", arxiv_id, e)
     return None
 
 
 def download_paper(doi: str, output_dir: str = ".") -> dict:
     """下载论文的主入口，按优先级尝试多个来源
 
-    优先级：Unpaywall (合法OA) → arXiv → Sci-Hub (自定义) → Sci-Hub (scidownl)
+    优先级：Unpaywall (合法OA) → Publisher OA → arXiv → Sci-Hub (自定义) → Sci-Hub (scidownl)
     """
+    doi = doi.strip()
+    if not doi:
+        return {"success": False, "doi": doi, "error": "DOI cannot be empty"}
+
     os.makedirs(output_dir, exist_ok=True)
     output = os.path.join(output_dir, _safe_name(doi))
 
@@ -260,12 +289,14 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
             "source": "cached",
         }
 
+    log.info("downloading: %s", doi)
+
     # 1. Unpaywall (合法 OA)
     oa_url = _try_unpaywall(doi)
     if oa_url:
         try:
             r = requests.get(oa_url, timeout=30, allow_redirects=True)
-            if r.content[:5] == b"%PDF-":
+            if _is_valid_pdf(r.content):
                 with open(output, "wb") as f:
                     f.write(r.content)
                 return {
@@ -275,8 +306,8 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
                     "size_mb": round(len(r.content) / 1024 / 1024, 2),
                     "source": "unpaywall_oa",
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("unpaywall download failed: %s", e)
 
     # 2. Publisher OA (IOP, MDPI, Frontiers 等出版商直链)
     pub_data = _try_publisher_oa(doi)
@@ -304,7 +335,7 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
             "source": "arxiv",
         }
 
-    # 3. Sci-Hub (自定义镜像抓取)
+    # 4. Sci-Hub (自定义镜像抓取)
     scihub_data = _try_scihub(doi)
     if scihub_data:
         with open(output, "wb") as f:
@@ -317,7 +348,7 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
             "source": "sci-hub",
         }
 
-    # 4. scidownl 库 (备用 Sci-Hub 方案)
+    # 5. scidownl 库 (备用 Sci-Hub 方案)
     scidownl_path = _try_scidownl(doi, output_dir)
     if scidownl_path:
         size_mb = os.path.getsize(scidownl_path) / 1024 / 1024
@@ -329,7 +360,8 @@ def download_paper(doi: str, output_dir: str = ".") -> dict:
             "source": "scidownl",
         }
 
-    return {"success": False, "doi": doi, "error": "all sources failed (unpaywall/arxiv/sci-hub)"}
+    log.warning("all sources failed for %s", doi)
+    return {"success": False, "doi": doi, "error": "all sources failed (unpaywall/publisher/arxiv/sci-hub)"}
 
 
 def batch_download(dois: list[str], output_dir: str = ".") -> dict:

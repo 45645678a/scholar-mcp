@@ -22,7 +22,7 @@ class TestDownloadPaper:
     @patch("downloader.requests.get")
     def test_unpaywall_success(self, mock_get, mock_scidownl, mock_scihub, mock_arxiv, mock_pub, tmp_path):
         """Should use Unpaywall first when it returns a PDF URL."""
-        pdf_content = b"%PDF-1.4 fake pdf content here"
+        pdf_content = b"%PDF-1.4 fake pdf content here" + b"\x00" * 1100  # >1024 bytes for validation
 
         def side_effect(url, **kwargs):
             resp = MagicMock()

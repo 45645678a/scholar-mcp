@@ -8,7 +8,9 @@ import os
 import re
 from collections import Counter
 from searcher import search_papers
+from logger import get_logger
 
+log = get_logger("recommender")
 
 # 科学库 → 学术领域关键词映射
 LIBRARY_TO_KEYWORDS = {
@@ -183,6 +185,21 @@ LATEX_KEYWORD_RE = re.compile(
     r"\\(?:title|section|subsection|chapter)\{([^}]+)\}", re.MULTILINE
 )
 
+# 跳过的目录名集合
+_SKIP_DIRS = frozenset({
+    "node_modules", "__pycache__", "venv", "env", ".venv",
+    ".git", ".hg", ".svn", ".tox", ".mypy_cache",
+    "dist", "build", "egg-info", ".eggs",
+})
+
+# 最大扫描目录深度
+_MAX_SCAN_DEPTH = 8
+
+
+def _should_skip_dir(dirname: str) -> bool:
+    """检查是否应跳过目录（兼容 Windows 和 Unix）"""
+    return dirname.startswith(".") or dirname in _SKIP_DIRS
+
 
 def _scan_directory(workspace_path: str, max_files: int = 100) -> dict:
     """扫描工作区目录，收集代码特征"""
@@ -191,11 +208,17 @@ def _scan_directory(workspace_path: str, max_files: int = 100) -> dict:
     latex_titles = []
     file_count = 0
 
-    for root, _dirs, files in os.walk(workspace_path):
-        # 跳过隐藏目录和常见非代码目录
-        parts = root.replace("\\", "/").split("/")
-        if any(p.startswith(".") or p in ("node_modules", "__pycache__", "venv", "env", ".git") for p in parts):
+    base_depth = workspace_path.rstrip(os.sep).count(os.sep)
+
+    for root, dirs, files in os.walk(workspace_path):
+        # 检查深度限制
+        current_depth = root.count(os.sep) - base_depth
+        if current_depth >= _MAX_SCAN_DEPTH:
+            dirs.clear()
             continue
+
+        # 原地过滤跳过的目录（阻止 os.walk 进入）
+        dirs[:] = [d for d in dirs if not _should_skip_dir(d)]
 
         for fname in files:
             ext = os.path.splitext(fname)[1].lower()
@@ -208,9 +231,9 @@ def _scan_directory(workspace_path: str, max_files: int = 100) -> dict:
 
             fpath = os.path.join(root, fname)
             try:
-                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
                     content = f.read(50_000)  # 最多读 50KB
-            except Exception:
+            except (OSError, PermissionError):
                 continue
 
             lang = SCAN_EXTENSIONS[ext]
@@ -233,6 +256,7 @@ def _scan_directory(workspace_path: str, max_files: int = 100) -> dict:
         if file_count > max_files:
             break
 
+    log.info("scanned %d files in %s", file_count, workspace_path)
     return {
         "imports": imports,
         "academic_terms": academic_terms,
@@ -263,16 +287,18 @@ def _build_query(scan_result: dict, max_terms: int = 8) -> str:
     unique = []
     seen = set()
     for kw, _ in keywords:
-        for word in kw.split():
-            if word.lower() not in seen:
-                unique.append(word)
-                seen.add(word.lower())
+        for w in kw.split():
+            if w.lower() not in seen:
+                unique.append(w)
+                seen.add(w.lower())
             if len(unique) >= max_terms:
                 break
         if len(unique) >= max_terms:
             break
 
     return " ".join(unique)
+
+
 def _build_queries(scan_result: dict, max_queries: int = 3) -> list[str]:
     """从扫描结果构建多个查询（覆盖不同代码信号维度）"""
     queries = []
@@ -354,6 +380,8 @@ def recommend_papers(workspace_path: str, top_n: int = 8) -> dict:
             "success": False,
             "error": "could not extract meaningful keywords from workspace",
         }
+
+    log.info("recommend queries: %s", queries)
 
     # 3. 搜索论文（多查询合并）
     all_papers = []

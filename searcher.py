@@ -5,9 +5,19 @@
 """
 
 import re
+import math
 import time
+import datetime
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+
+from logger import get_logger
+import cache as _cache
+
+log = get_logger("searcher")
+
+# 预编译正则：标题规范化时保留 + 号（C++ 等）
+_TITLE_NORM_RE = re.compile(r'[^\w\s+]')
 
 
 def _retry_request(method, url, retries=2, backoff=1.0, **kwargs):
@@ -74,7 +84,8 @@ def _reconstruct_abstract(inv_idx: dict | None) -> str:
     pairs = []
     for word, positions in inv_idx.items():
         for pos in positions:
-            pairs.append((pos, word))
+            if isinstance(pos, int):
+                pairs.append((pos, word))
     pairs.sort()
     return " ".join(w for _, w in pairs)
 
@@ -129,7 +140,7 @@ def _search_crossref(query: str, rows: int = 8) -> list[dict]:
         year = ""
         if item.get("published") and item["published"].get("date-parts"):
             year = item["published"]["date-parts"][0][0]
-        abstract = (item.get("abstract") or "").replace("<jats:p>", "").replace("</jats:p>", "").replace("<jats:title>", "").replace("</jats:title>", "").strip()
+        abstract = re.sub(r'</?jats:[^>]+>', '', item.get("abstract") or "").strip()
         results.append(_paper(
             title=(item.get("title") or [""])[0],
             authors=", ".join(f"{a.get('given', '')} {a.get('family', '')}" for a in (item.get("author") or [])),
@@ -301,6 +312,14 @@ def _search_europe_pmc(query: str, rows: int = 8) -> list[dict]:
     )
     results = []
     for item in r.json().get("resultList", {}).get("result", []):
+        # 安全提取 OA URL
+        oa_url = ""
+        ft_list = item.get("fullTextUrlList")
+        if ft_list and isinstance(ft_list, dict):
+            ft_urls = ft_list.get("fullTextUrl", [])
+            if ft_urls and isinstance(ft_urls, list) and ft_urls[0]:
+                oa_url = ft_urls[0].get("url", "")
+
         results.append(_paper(
             title=item.get("title", ""),
             authors=item.get("authorString", ""),
@@ -309,7 +328,7 @@ def _search_europe_pmc(query: str, rows: int = 8) -> list[dict]:
             doi=item.get("doi", ""),
             cited_by=item.get("citedByCount", 0),
             abstract=item.get("abstractText", ""),
-            open_access_url=item.get("fullTextUrlList", {}).get("fullTextUrl", [{}])[0].get("url", "") if item.get("fullTextUrlList") else "",
+            open_access_url=oa_url,
             source="europe_pmc",
         ))
     return results
@@ -398,10 +417,9 @@ ALL_CONNECTORS = {
 
 
 def _normalize_title(title: str) -> str:
-    """标题归一化：小写、去标点、去多余空格"""
-    import re as _re
+    """标题归一化：小写、去标点（保留 +）、去多余空格"""
     t = title.lower().strip()
-    t = _re.sub(r'[^\w\s]', ' ', t)
+    t = _TITLE_NORM_RE.sub(' ', t)
     return ' '.join(t.split())
 
 
@@ -467,8 +485,6 @@ def _merge_results(all_sources: list[list[dict]], limit: int) -> list[dict]:
 
 def _relevance_score(paper: dict, query: str) -> float:
     """计算论文的综合相关性得分，融合查询匹配、引用数、源质量和年份"""
-    import math
-
     score = 0.0
     query_terms = set(query.lower().split())
 
@@ -500,7 +516,6 @@ def _relevance_score(paper: dict, query: str) -> float:
     try:
         year = int(paper.get("year") or "0")
         if year > 0:
-            import datetime
             current_year = datetime.datetime.now().year
             age = max(current_year - year, 0)
             if age <= 1:
@@ -535,7 +550,13 @@ def _merge_and_rank(all_sources: list[list[dict]], query: str, limit: int) -> li
 
 
 def search_papers(query: str, rows: int = 8) -> dict:
-    """搜索论文 — 9 源并发搜索 + 智能去重 + 综合相关性排序"""
+    """搜索论文 — 9 源并发搜索 + 智能去重 + 综合相关性排序（支持缓存）"""
+    # 检查缓存
+    cached = _cache.get_search(query, rows)
+    if cached:
+        cached["from_cache"] = True
+        return cached
+
     is_doi = query.strip().startswith("10.")
 
     # DOI 精确查询只走 Crossref
@@ -555,39 +576,57 @@ def search_papers(query: str, rows: int = 8) -> dict:
     sources_fail = []
     fetch_rows = min(rows * 2, 20)
 
-    def _call_with_retry(fn, query, rows, retries=1):
-        """单 connector 带重试调用"""
-        for i in range(retries + 1):
-            try:
-                return fn(query, rows)
-            except Exception:
-                if i >= retries:
-                    raise
-                time.sleep(1.0 * (2 ** i))
+    def _call_connector(fn, query, rows):
+        """单 connector 调用"""
+        try:
+            return fn(query, rows)
+        except Exception:
+            raise
 
     with ThreadPoolExecutor(max_workers=9) as executor:
         futures = {
-            executor.submit(_call_with_retry, fn, query, fetch_rows): name
+            executor.submit(_call_connector, fn, query, fetch_rows): name
             for name, fn in ALL_CONNECTORS.items()
         }
-        for future in as_completed(futures, timeout=25):
-            name = futures[future]
-            try:
-                result = future.result()
-                if result:
-                    all_results.append(result)
-                    sources_ok.append(name)
-            except Exception as e:
-                sources_fail.append(f"{name}: {str(e)[:40]}")
+        try:
+            for future in as_completed(futures, timeout=30):
+                name = futures[future]
+                try:
+                    result = future.result(timeout=5)
+                    if result:
+                        all_results.append(result)
+                        sources_ok.append(name)
+                except Exception as e:
+                    sources_fail.append(f"{name}: {str(e)[:40]}")
+        except FuturesTimeoutError:
+            # 部分 connector 超时，收集已完成的结果
+            for future, name in futures.items():
+                if future.done() and not future.cancelled():
+                    try:
+                        result = future.result(timeout=0)
+                        if result and name not in sources_ok:
+                            all_results.append(result)
+                            sources_ok.append(name)
+                    except Exception:
+                        if name not in [s.split(":")[0] for s in sources_fail]:
+                            sources_fail.append(f"{name}: timeout")
+                elif not future.done():
+                    future.cancel()
+                    sources_fail.append(f"{name}: timeout")
+
+    log.info("search done: ok=%s fail=%s total_papers=%d",
+             sources_ok, sources_fail, sum(len(r) for r in all_results))
 
     if all_results:
         merged = _merge_and_rank(all_results, query, rows)
-        return {
+        result = {
             "success": True,
             "count": len(merged),
             "sources_ok": sources_ok,
             "sources_fail": sources_fail,
             "results": merged,
         }
+        _cache.set_search(query, rows, result)
+        return result
     else:
-        return {"success": False, "error": f"all {len(ALL_CONNECTORS)} sources failed"}
+        return {"success": False, "error": f"all {len(ALL_CONNECTORS)} sources failed", "sources_fail": sources_fail}

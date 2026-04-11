@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scholar-mcp-server"
-version = "0.4.0"
-description = "Local academic paper MCP server — 9-source search, multi-source download, AI analysis, citation graph, code-based paper recommendation"
+version = "0.5.0"
+description = "Local academic paper MCP server — 9-source search, multi-source download, AI analysis, translation, citation graph, code-based paper recommendation"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "mcp>=1.0.0",
     "requests>=2.31.0",
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
@@ -54,5 +55,9 @@ py-modules = [
     "recommender",
     "citation_graph",
     "pdf_reader",
+    "logger",
+    "cache",
+    "translator",
+    "async_searcher",
     "install",
 ]

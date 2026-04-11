@@ -1,6 +1,6 @@
 # Scholar MCP Server
 
-Local academic paper tool MCP server — **9-source search**, multi-source download, AI-powered analysis, citation graph, code-based paper recommendation.
+Local academic paper tool MCP server — **9-source search**, multi-source download, AI-powered analysis & translation, citation graph, code-based paper recommendation.
 
 [![PyPI](https://img.shields.io/pypi/v/scholar-mcp-server)](https://pypi.org/project/scholar-mcp-server/)
 [![Python](https://img.shields.io/pypi/pyversions/scholar-mcp-server)](https://pypi.org/project/scholar-mcp-server/)
@@ -20,12 +20,13 @@ That's it. Restart your IDE and start using it.
 
 | Tool | Description |
 |---|---|
-| `paper_search` | 9-source concurrent search with relevance scoring (Semantic Scholar, OpenAlex, Crossref, PubMed, arXiv, CORE, Europe PMC, DOAJ, dblp) |
+| `paper_search` | 9-source concurrent search with relevance scoring and **result caching** (Semantic Scholar, OpenAlex, Crossref, PubMed, arXiv, CORE, Europe PMC, DOAJ, dblp) |
 | `paper_download` | Multi-source PDF download: Unpaywall → Publisher OA → arXiv → Sci-Hub → scidownl |
 | `paper_batch_download` | Batch download multiple papers by DOI list |
 | `paper_ai_analyze` | AI analysis — downloads PDF, extracts full text (up to 20 pages / 12k chars), sends to any OpenAI-compatible API |
+| `paper_translate` | AI translation — translate papers by DOI, PDF path, or direct text input. Supports chunked translation for long papers |
 | `paper_recommend` | Scan your workspace code → multi-query auto-recommend related papers |
-| `paper_citation_graph` | Generate Mermaid citation/reference network visualization |
+| `paper_citation_graph` | Generate Mermaid citation/reference network visualization with cycle detection |
 | `paper_health` | Check download source availability |
 
 ### Search Quality
@@ -34,16 +35,28 @@ Search results are ranked by a **4-factor composite score**:
 
 | Factor | Weight | Description |
 |---|---|---|
-| Query relevance | 0–40 | Title + abstract term matching |
-| Citation impact | 0–30 | Log-scaled citation count |
-| Source quality | 0–10 | Data source reliability weighting |
-| Year recency | 0–15 | Boost for recent publications |
+| Query relevance | 0-40 | Title + abstract term matching |
+| Citation impact | 0-30 | Log-scaled citation count |
+| Source quality | 0-10 | Data source reliability weighting |
+| Year recency | 0-15 | Boost for recent publications |
 
-Deduplication uses **DOI matching + Jaccard title similarity** (≥0.7 threshold) across all 9 sources. Each source connector has built-in **retry with exponential backoff**.
+Deduplication uses **DOI matching + Jaccard title similarity** (>=0.7 threshold) across all 9 sources. Each source connector has built-in **retry with exponential backoff**.
 
-## AI Analysis
+### Search Caching
 
-`paper_ai_analyze` works with **any OpenAI-compatible API**. Set `AI_API_BASE`, `AI_API_KEY`, and `AI_MODEL` to point to your preferred provider.
+Search results are cached in SQLite (default 24h TTL). This avoids hitting 9 APIs for repeated queries.
+
+| Variable | Description | Default |
+|---|---|---|
+| `SCHOLAR_MCP_CACHE` | Enable/disable cache (`0` to disable) | `1` |
+| `SCHOLAR_MCP_CACHE_TTL` | Cache TTL in seconds | `86400` (24h) |
+| `SCHOLAR_MCP_CACHE_DIR` | Cache directory | `~/.scholar-mcp` |
+
+## AI Analysis & Translation
+
+`paper_ai_analyze` and `paper_translate` work with **any OpenAI-compatible API**. Set `AI_API_BASE`, `AI_API_KEY`, and `AI_MODEL` to point to your preferred provider.
+
+Translation supports multiple target languages: `zh` (Chinese), `en` (English), `ja` (Japanese), `ko` (Korean), `de` (German), `fr` (French), `es` (Spanish), `ru` (Russian).
 
 ## Alternative Install (Git Clone)
 
@@ -58,10 +71,12 @@ python install.py --all
 
 | Variable | Description | Required |
 |---|---|---|
-| `AI_API_KEY` | API key for AI analysis | For `paper_ai_analyze` |
+| `AI_API_KEY` | API key for AI analysis/translation | For `paper_ai_analyze` / `paper_translate` |
 | `AI_API_BASE` | API base URL (any OpenAI-compatible endpoint) | Optional (default: `https://api.deepseek.com`) |
 | `AI_MODEL` | Model name | Optional (default: `deepseek-chat`) |
 | `UNPAYWALL_EMAIL` | Email for Unpaywall API | Optional |
+| `SCHOLAR_MCP_LOG_LEVEL` | Log level: DEBUG, INFO, WARNING, ERROR | Optional (default: `INFO`) |
+| `SCHOLAR_MCP_LOG_FILE` | Log output file path | Optional (stderr only by default) |
 
 ## Supported IDEs
 
@@ -94,9 +109,9 @@ pip install .[all] pytest
 pytest tests/ -v
 ```
 
-40 tests covering search dedup, download chain, keyword extraction, and connector mocking.
+100+ tests covering search dedup, download chain, keyword extraction, PDF extraction, citation graph, server tools, installer, and connector mocking.
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 This tool includes optional Sci-Hub integration for personal academic use. Sci-Hub may be illegal in some jurisdictions. **Users are solely responsible for ensuring compliance with local laws and institutional policies.** The authors do not endorse copyright infringement. If you are in a compliance-sensitive environment (university, company, lab), consult your institution's policy before using the Sci-Hub download source.
 
